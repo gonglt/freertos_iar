@@ -1,0 +1,242 @@
+###############################################################################
+#
+# IAR ANSI C/C++ Compiler V7.80.4.12462/W32 for ARM       14/May/2018  20:56:17
+# Copyright 1999-2017 IAR Systems AB.
+#
+#    Cpu mode     =  thumb
+#    Endian       =  little
+#    Source file  =  
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\timertest.c
+#    Command line =  
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\timertest.c
+#        -D VECT_TAB_FLASH -D IAR_ARM_CM3 -lcN
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\Debug\List
+#        --diag_suppress Pa082,pe191 -o
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\Debug\Obj
+#        --no_cse --no_unroll --no_inline --no_code_motion --no_tbaa
+#        --no_clustering --no_scheduling --debug --endian=little
+#        --cpu=Cortex-M3 -e --fpu=None --dlib_config "C:\Program Files
+#        (x86)\IAR Systems\Embedded Workbench 7.5\arm\INC\c\DLib_Config_Full.h"
+#        -I
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\.\
+#        -I
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\STM32F10xFWLib\inc\
+#        -I
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\..\..\Source\include\
+#        -I
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\..\common\include\
+#        -Ol --use_c++_inline --require_prototypes
+#    Locale       =  Chinese (Simplified)_People's Republic of China.936
+#    List file    =  
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\Debug\List\timertest.lst
+#    Object file  =  
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\Debug\Obj\timertest.o
+#
+###############################################################################
+
+C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\timertest.c
+      1          /*
+      2           * FreeRTOS Kernel V10.0.1
+      3           * Copyright (C) 2017 Amazon.com, Inc. or its affiliates.  All Rights Reserved.
+      4           *
+      5           * Permission is hereby granted, free of charge, to any person obtaining a copy of
+      6           * this software and associated documentation files (the "Software"), to deal in
+      7           * the Software without restriction, including without limitation the rights to
+      8           * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+      9           * the Software, and to permit persons to whom the Software is furnished to do so,
+     10           * subject to the following conditions:
+     11           *
+     12           * The above copyright notice and this permission notice shall be included in all
+     13           * copies or substantial portions of the Software.
+     14           *
+     15           * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     16           * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+     17           * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+     18           * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+     19           * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+     20           * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+     21           *
+     22           * http://www.FreeRTOS.org
+     23           * http://aws.amazon.com/freertos
+     24           *
+     25           * 1 tab == 4 spaces!
+     26           */
+     27          
+     28          /* High speed timer test as described in main.c. */
+     29          
+     30          /* Scheduler includes. */
+     31          #include "FreeRTOS.h"
+     32          
+     33          /* Library includes. */
+     34          #include "stm32f10x_lib.h"
+     35          #include "stm32f10x_tim.h"
+     36          #include "stm32f10x_map.h"
+     37          
+     38          /* The set frequency of the interrupt.  Deviations from this are measured as
+     39          the jitter. */
+     40          #define timerINTERRUPT_FREQUENCY		( ( unsigned short ) 20000 )
+     41          
+     42          /* The expected time between each of the timer interrupts - if the jitter was
+     43          zero. */
+     44          #define timerEXPECTED_DIFFERENCE_VALUE	( configCPU_CLOCK_HZ / timerINTERRUPT_FREQUENCY )
+     45          
+     46          /* The highest available interrupt priority. */
+     47          #define timerHIGHEST_PRIORITY			( 0 )
+     48          
+     49          /* Misc defines. */
+     50          #define timerMAX_32BIT_VALUE			( 0xffffffffUL )
+     51          #define timerTIMER_1_COUNT_VALUE		( * ( ( unsigned long * ) ( TIMER1_BASE + 0x48 ) ) )
+     52          
+     53          /* The number of interrupts to pass before we start looking at the jitter. */
+     54          #define timerSETTLE_TIME			5
+     55          
+     56          /*-----------------------------------------------------------*/
+     57          
+     58          /*
+     59           * Configures the two timers used to perform the test.
+     60           */
+     61          void vSetupTimerTest( void );
+     62          
+     63          /* Interrupt handler in which the jitter is measured. */
+     64          void vTimer2IntHandler( void );
+     65          
+     66          /* Stores the value of the maximum recorded jitter between interrupts. */
+     67          volatile unsigned short usMaxJitter = 0;
+     68          
+     69          /*-----------------------------------------------------------*/
+     70          
+     71          void vSetupTimerTest( void )
+     72          {
+     73          unsigned long ulFrequency;
+     74          TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
+     75          NVIC_InitTypeDef NVIC_InitStructure;
+     76          
+     77          
+     78          	/* Enable timer clocks */
+     79          	RCC_APB1PeriphClockCmd( RCC_APB1Periph_TIM2, ENABLE );
+     80          	RCC_APB1PeriphClockCmd( RCC_APB1Periph_TIM3, ENABLE );
+     81          
+     82          	/* Initialise data. */
+     83          	TIM_DeInit( TIM2 );
+     84          	TIM_DeInit( TIM3 );
+     85          	TIM_TimeBaseStructInit( &TIM_TimeBaseStructure );
+     86          
+     87          	/* Time base configuration for timer 2 - which generates the interrupts. */
+     88          	ulFrequency = configCPU_CLOCK_HZ / timerINTERRUPT_FREQUENCY;	
+     89          	TIM_TimeBaseStructure.TIM_Period = ( unsigned short ) ( ulFrequency & 0xffffUL );
+     90          	TIM_TimeBaseStructure.TIM_Prescaler = 0x0;
+     91          	TIM_TimeBaseStructure.TIM_ClockDivision = 0x0;
+     92          	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+     93          	TIM_TimeBaseInit( TIM2, &TIM_TimeBaseStructure );
+     94          	TIM_ARRPreloadConfig( TIM2, ENABLE );
+     95          
+     96          	
+     97          	/* Configuration for timer 3 which is used as a high resolution time
+     98          	measurement. */
+     99          	TIM_TimeBaseStructure.TIM_Period = ( unsigned short ) 0xffff;
+    100          	TIM_TimeBaseInit( TIM3, &TIM_TimeBaseStructure );
+    101          	TIM_ARRPreloadConfig( TIM3, ENABLE );
+    102          	
+    103          	/* Enable TIM2 IT.  TIM3 does not generate an interrupt. */
+    104          	NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQChannel;
+    105          	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
+    106          	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = timerHIGHEST_PRIORITY;
+    107          	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    108          	NVIC_Init( &NVIC_InitStructure );	
+    109          	TIM_ITConfig( TIM2, TIM_IT_Update, ENABLE );
+    110          
+    111          	/* Finally, enable both timers. */
+    112          	TIM_Cmd( TIM2, ENABLE );
+    113          	TIM_Cmd( TIM3, ENABLE );
+    114          }
+    115          /*-----------------------------------------------------------*/
+    116          
+    117          void vTimer2IntHandler( void )
+    118          {
+    119          static unsigned short usLastCount = 0, usSettleCount = 0, usMaxDifference = 0;
+    120          unsigned short usThisCount, usDifference;
+    121          
+    122          	/* Capture the free running timer 3 value as we enter the interrupt. */
+    123          	usThisCount = TIM3->CNT;
+    124          	
+    125          	if( usSettleCount >= timerSETTLE_TIME )
+    126          	{
+    127          		/* What is the difference between the timer value in this interrupt
+    128          		and the value from the last interrupt. */
+    129          		usDifference = usThisCount - usLastCount;
+    130          
+    131          		/* Store the difference in the timer values if it is larger than the
+    132          		currently stored largest value.  The difference over and above the
+    133          		expected difference will give the 'jitter' in the processing of these
+    134          		interrupts. */
+    135          		if( usDifference > usMaxDifference )
+    136          		{
+    137          			usMaxDifference = usDifference;
+    138          			usMaxJitter = usMaxDifference - timerEXPECTED_DIFFERENCE_VALUE;
+    139          		}
+    140          	}
+    141          	else
+    142          	{
+    143          		/* Don't bother storing any values for the first couple of
+    144          		interrupts. */
+    145          		usSettleCount++;
+    146          	}
+    147          
+    148          	/* Remember what the timer value was this time through, so we can calculate
+    149          	the difference the next time through. */
+    150          	usLastCount = usThisCount;
+    151          
+    152              TIM_ClearITPendingBit( TIM2, TIM_IT_Update );
+    153          }
+    154          
+    155          
+    156          
+    157          
+    158          
+    159          
+    160          
+    161          
+
+   Maximum stack usage in bytes:
+
+   .cstack Function
+   ------- --------
+      16   vSetupTimerTest
+        16   -> NVIC_Init
+        16   -> RCC_APB1PeriphClockCmd
+        16   -> TIM_ARRPreloadConfig
+        16   -> TIM_Cmd
+        16   -> TIM_DeInit
+        16   -> TIM_ITConfig
+        16   -> TIM_TimeBaseInit
+        16   -> TIM_TimeBaseStructInit
+       8   vTimer2IntHandler
+         8   -> TIM_ClearITPendingBit
+
+
+   Section sizes:
+
+   Bytes  Function/Label
+   -----  --------------
+       4  ??DataTable1
+       4  ??DataTable1_1
+       4  ??DataTable1_2
+       4  ??DataTable1_3
+       4  ??DataTable1_4
+       4  ??DataTable1_5
+       2  usLastCount
+       2  usMaxDifference
+       2  usMaxJitter
+       2  usSettleCount
+     178  vSetupTimerTest
+      78  vTimer2IntHandler
+
+ 
+   8 bytes in section .bss
+ 280 bytes in section .text
+ 
+ 280 bytes of CODE memory
+   8 bytes of DATA memory
+
+Errors: none
+Warnings: none

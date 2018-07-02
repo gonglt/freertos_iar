@@ -1,0 +1,299 @@
+###############################################################################
+#
+# IAR ANSI C/C++ Compiler V7.80.4.12462/W32 for ARM       14/May/2018  20:56:15
+# Copyright 1999-2017 IAR Systems AB.
+#
+#    Cpu mode     =  thumb
+#    Endian       =  little
+#    Source file  =  
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\Common\Minimal\death.c
+#    Command line =  
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\Common\Minimal\death.c
+#        -D VECT_TAB_FLASH -D IAR_ARM_CM3 -lcN
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\Debug\List
+#        --diag_suppress Pa082,pe191 -o
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\Debug\Obj
+#        --no_cse --no_unroll --no_inline --no_code_motion --no_tbaa
+#        --no_clustering --no_scheduling --debug --endian=little
+#        --cpu=Cortex-M3 -e --fpu=None --dlib_config "C:\Program Files
+#        (x86)\IAR Systems\Embedded Workbench 7.5\arm\INC\c\DLib_Config_Full.h"
+#        -I
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\.\
+#        -I
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\STM32F10xFWLib\inc\
+#        -I
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\..\..\Source\include\
+#        -I
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\..\common\include\
+#        -Ol --use_c++_inline --require_prototypes
+#    Locale       =  Chinese (Simplified)_People's Republic of China.936
+#    List file    =  
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\Debug\List\death.lst
+#    Object file  =  
+#        C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\CORTEX_STM32F103_IAR\Debug\Obj\death.o
+#
+###############################################################################
+
+C:\Users\gonglt\Downloads\FreeRTOSv10.0.1\FreeRTOS\Demo\Common\Minimal\death.c
+      1          /*
+      2           * FreeRTOS Kernel V10.0.1
+      3           * Copyright (C) 2017 Amazon.com, Inc. or its affiliates.  All Rights Reserved.
+      4           *
+      5           * Permission is hereby granted, free of charge, to any person obtaining a copy of
+      6           * this software and associated documentation files (the "Software"), to deal in
+      7           * the Software without restriction, including without limitation the rights to
+      8           * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+      9           * the Software, and to permit persons to whom the Software is furnished to do so,
+     10           * subject to the following conditions:
+     11           *
+     12           * The above copyright notice and this permission notice shall be included in all
+     13           * copies or substantial portions of the Software.
+     14           *
+     15           * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     16           * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+     17           * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+     18           * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+     19           * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+     20           * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+     21           *
+     22           * http://www.FreeRTOS.org
+     23           * http://aws.amazon.com/freertos
+     24           *
+     25           * 1 tab == 4 spaces!
+     26           */
+     27          
+     28          /**
+     29           * Create a single persistent task which periodically dynamically creates another
+     30           * two tasks.  The original task is called the creator task, the two tasks it
+     31           * creates are called suicidal tasks.
+     32           *
+     33           * One of the created suicidal tasks kill one other suicidal task before killing
+     34           * itself - leaving just the original task remaining.
+     35           *
+     36           * The creator task must be spawned after all of the other demo application tasks
+     37           * as it keeps a check on the number of tasks under the scheduler control.  The
+     38           * number of tasks it expects to see running should never be greater than the
+     39           * number of tasks that were in existence when the creator task was spawned, plus
+     40           * one set of four suicidal tasks.  If this number is exceeded an error is flagged.
+     41           *
+     42           * \page DeathC death.c
+     43           * \ingroup DemoFiles
+     44           * <HR>
+     45           */
+     46          
+     47          
+     48          #include <stdlib.h>
+     49          
+     50          /* Scheduler include files. */
+     51          #include "FreeRTOS.h"
+     52          #include "task.h"
+     53          
+     54          /* Demo program include files. */
+     55          #include "death.h"
+     56          
+     57          #define deathSTACK_SIZE		( configMINIMAL_STACK_SIZE + 60 )
+     58          
+     59          /* The task originally created which is responsible for periodically dynamically
+     60          creating another four tasks. */
+     61          static portTASK_FUNCTION_PROTO( vCreateTasks, pvParameters );
+     62          
+     63          /* The task function of the dynamically created tasks. */
+     64          static portTASK_FUNCTION_PROTO( vSuicidalTask, pvParameters );
+     65          
+     66          /* A variable which is incremented every time the dynamic tasks are created.  This
+     67          is used to check that the task is still running. */
+     68          static volatile uint16_t usCreationCount = 0;
+     69          
+     70          /* Used to store the number of tasks that were originally running so the creator
+     71          task can tell if any of the suicidal tasks have failed to die.
+     72          */
+     73          static volatile UBaseType_t uxTasksRunningAtStart = 0;
+     74          
+     75          /* When a task deletes itself, it stack and TCB are cleaned up by the Idle task.
+     76          Under heavy load the idle task might not get much processing time, so it would
+     77          be legitimate for several tasks to remain undeleted for a short period.  There
+     78          may also be a few other unexpected tasks if, for example, the tasks that test
+     79          static allocation are also being used. */
+     80          static const UBaseType_t uxMaxNumberOfExtraTasksRunning = 3;
+     81          
+     82          /* Used to store a handle to the task that should be killed by a suicidal task,
+     83          before it kills itself. */
+     84          TaskHandle_t xCreatedTask;
+     85          
+     86          /*-----------------------------------------------------------*/
+     87          
+     88          void vCreateSuicidalTasks( UBaseType_t uxPriority )
+     89          {
+     90          	xTaskCreate( vCreateTasks, "CREATOR", deathSTACK_SIZE, ( void * ) NULL, uxPriority, NULL );
+     91          }
+     92          /*-----------------------------------------------------------*/
+     93          
+     94          static portTASK_FUNCTION( vSuicidalTask, pvParameters )
+     95          {
+     96          volatile long l1, l2;
+     97          TaskHandle_t xTaskToKill;
+     98          const TickType_t xDelay = pdMS_TO_TICKS( ( TickType_t ) 200 );
+     99          
+    100          	/* Test deletion of a task's secure context, if any. */
+    101          	portTASK_CALLS_SECURE_FUNCTIONS();
+    102          
+    103          	if( pvParameters != NULL )
+    104          	{
+    105          		/* This task is periodically created four times.  Two created tasks are
+    106          		passed a handle to the other task so it can kill it before killing itself.
+    107          		The other task is passed in null. */
+    108          		xTaskToKill = *( TaskHandle_t* )pvParameters;
+    109          	}
+    110          	else
+    111          	{
+    112          		xTaskToKill = NULL;
+    113          	}
+    114          
+    115          	for( ;; )
+    116          	{
+    117          		/* Do something random just to use some stack and registers. */
+    118          		l1 = 2;
+    119          		l2 = 89;
+    120          		l2 *= l1;
+    121          		vTaskDelay( xDelay );
+    122          
+    123          		if( xTaskToKill != NULL )
+    124          		{
+    125          			/* Make sure the other task has a go before we delete it. */
+    126          			vTaskDelay( ( TickType_t ) 0 );
+    127          
+    128          			/* Kill the other task that was created by vCreateTasks(). */
+    129          			vTaskDelete( xTaskToKill );
+    130          
+    131          			/* Kill ourselves. */
+    132          			vTaskDelete( NULL );
+    133          		}
+    134          	}
+    135          }/*lint !e818 !e550 Function prototype must be as per standard for task functions. */
+    136          /*-----------------------------------------------------------*/
+    137          
+    138          static portTASK_FUNCTION( vCreateTasks, pvParameters )
+    139          {
+    140          const TickType_t xDelay = pdMS_TO_TICKS( ( TickType_t ) 1000 );
+    141          UBaseType_t uxPriority;
+    142          
+    143          	/* Remove compiler warning about unused parameter. */
+    144          	( void ) pvParameters;
+    145          
+    146          	/* Delay at the start to ensure tasks created by other demos have been
+    147          	created before storing the current number of tasks. */
+    148          	vTaskDelay( xDelay );
+    149          	uxTasksRunningAtStart = ( UBaseType_t ) uxTaskGetNumberOfTasks();
+    150          
+    151          	uxPriority = uxTaskPriorityGet( NULL );
+    152          
+    153          	for( ;; )
+    154          	{
+    155          		/* Just loop round, delaying then creating the four suicidal tasks. */
+    156          		vTaskDelay( xDelay );
+    157          
+    158          		xCreatedTask = NULL;
+    159          
+    160          		xTaskCreate( vSuicidalTask, "SUICID1", configMINIMAL_STACK_SIZE, NULL, uxPriority, &xCreatedTask );
+    161          		xTaskCreate( vSuicidalTask, "SUICID2", configMINIMAL_STACK_SIZE, &xCreatedTask, uxPriority, NULL );
+    162          
+    163          		++usCreationCount;
+    164          	}
+    165          }
+    166          /*-----------------------------------------------------------*/
+    167          
+    168          /* This is called to check that the creator task is still running and that there
+    169          are not any more than four extra tasks. */
+    170          BaseType_t xIsCreateTaskStillRunning( void )
+    171          {
+    172          static uint16_t usLastCreationCount = 0xfff;
+    173          BaseType_t xReturn = pdTRUE;
+    174          static UBaseType_t uxTasksRunningNow;
+    175          
+    176          	if( usLastCreationCount == usCreationCount )
+    177          	{
+    178          		xReturn = pdFALSE;
+    179          	}
+    180          	else
+    181          	{
+    182          		usLastCreationCount = usCreationCount;
+    183          	}
+    184          
+    185          	uxTasksRunningNow = ( UBaseType_t ) uxTaskGetNumberOfTasks();
+    186          
+    187          	if( uxTasksRunningNow < uxTasksRunningAtStart )
+    188          	{
+    189          		xReturn = pdFALSE;
+    190          	}
+    191          	else if( ( uxTasksRunningNow - uxTasksRunningAtStart ) > uxMaxNumberOfExtraTasksRunning )
+    192          	{
+    193          		xReturn = pdFALSE;
+    194          	}
+    195          	else
+    196          	{
+    197          		/* Everything is okay. */
+    198          	}
+    199          
+    200          	return xReturn;
+    201          }
+    202          
+    203          
+
+   Maximum stack usage in bytes:
+
+   .cstack Function
+   ------- --------
+      16   vCreateSuicidalTasks
+        16   -> xTaskCreate
+      24   vCreateTasks
+        24   -> uxTaskGetNumberOfTasks
+        24   -> uxTaskPriorityGet
+        24   -> vTaskDelay
+        24   -> xTaskCreate
+      24   vSuicidalTask
+        24   -> vTaskDelay
+        24   -> vTaskDelete
+       8   xIsCreateTaskStillRunning
+         8   -> uxTaskGetNumberOfTasks
+
+
+   Section sizes:
+
+   Bytes  Function/Label
+   -----  --------------
+       4  ??DataTable2
+       4  ??DataTable2_1
+       4  ??DataTable2_2
+       4  ??DataTable2_3
+       4  ??DataTable2_4
+       4  ??DataTable2_5
+       4  ??DataTable2_6
+       4  ??DataTable2_7
+       4  ??DataTable2_8
+       4  ??DataTable2_9
+       8  ?_0
+       8  ?_1
+       8  ?_2
+       2  usCreationCount
+       2  usLastCreationCount
+       4  uxMaxNumberOfExtraTasksRunning
+       4  uxTasksRunningAtStart
+       4  uxTasksRunningNow
+      26  vCreateSuicidalTasks
+      90  vCreateTasks
+      64  vSuicidalTask
+       4  xCreatedTask
+      76  xIsCreateTaskStillRunning
+
+ 
+  14 bytes in section .bss
+   2 bytes in section .data
+  28 bytes in section .rodata
+ 296 bytes in section .text
+ 
+ 296 bytes of CODE  memory
+  28 bytes of CONST memory
+  16 bytes of DATA  memory
+
+Errors: none
+Warnings: none
